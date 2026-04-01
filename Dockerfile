@@ -17,6 +17,10 @@ RUN apt-get update && apt-get install -y \
     && mkdir -p /app/input /app/output
 
 COPY main.py /app/main.py
+COPY models-explorer.html /app/models-explorer.html
+COPY models-explorer.css /app/models-explorer.css
+COPY models-explorer.js /app/models-explorer.js
+COPY models.json /app/models.json
 
 EXPOSE 8000
 

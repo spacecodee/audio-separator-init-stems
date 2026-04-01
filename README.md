@@ -169,6 +169,53 @@ Ya existe el script `export_models_json.sh` en la raíz del proyecto. Uso rápid
 
 El script detecta si el servicio está corriendo y usa `docker compose exec -T` o, en su defecto, `docker compose run --rm`.
 
+## Models Explorer UI (dark mode)
+
+Se agrego una pagina interactiva para explorar `models.json` con enfoque user-friendly:
+
+- filtros por arquitectura, stem, metrica y score minimo
+- resumen estadistico de cobertura y distribucion
+- graficas de arquitectura, stems y top modelos
+- tabla paginada con detalle por modelo
+- comparador de varios modelos por stem/metrica
+
+Archivos:
+
+- `models-explorer.html`
+- `models-explorer.css`
+- `models-explorer.js`
+- `run_models_explorer.sh`
+
+### Opcion recomendada: integrado en FastAPI
+
+Con el servicio levantado, abre directamente:
+
+```text
+http://127.0.0.1:8000/models-explorer
+```
+
+Assets y datos servidos por la API:
+
+- `/models-explorer.css`
+- `/models-explorer.js`
+- `/models.json`
+
+Para abrirla localmente:
+
+```bash
+cd /teamspace/studios/this_studio/audio-separator-init-stems
+chmod +x run_models_explorer.sh
+./run_models_explorer.sh 8088
+```
+
+Luego abre en tu navegador:
+
+```text
+http://127.0.0.1:8088/models-explorer.html
+```
+
+Tambien puedes cargar un JSON custom con el boton `Cargar JSON custom`.
+
 ## Ejecutar la imagen oficial del proyecto (one-shot)
 
 Si prefieres usar la imagen oficial `beveradb/audio-separator` en lugar de tu API:

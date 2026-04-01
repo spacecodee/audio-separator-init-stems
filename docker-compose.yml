@@ -15,6 +15,10 @@ services:
               capabilities: [gpu]
     volumes:
       - ./main.py:/app/main.py
+      - ./models-explorer.html:/app/models-explorer.html
+      - ./models-explorer.css:/app/models-explorer.css
+      - ./models-explorer.js:/app/models-explorer.js
+      - ./models.json:/app/models.json
       - ./input:/app/input
       - ./output:/app/output
       - ./models:/root/.cache/audio-separator

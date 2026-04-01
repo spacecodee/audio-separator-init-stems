@@ -26,6 +26,11 @@ app = FastAPI(
 INPUT_DIR  = Path("/app/input")
 OUTPUT_DIR = Path("/app/output")
 MODEL_DIR  = Path("/root/.cache/audio-separator")
+APP_DIR = Path("/app")
+MODELS_EXPLORER_HTML = APP_DIR / "models-explorer.html"
+MODELS_EXPLORER_CSS = APP_DIR / "models-explorer.css"
+MODELS_EXPLORER_JS = APP_DIR / "models-explorer.js"
+MODELS_EXPLORER_JSON = APP_DIR / "models.json"
 
 for d in [INPUT_DIR, OUTPUT_DIR, MODEL_DIR]:
     d.mkdir(parents=True, exist_ok=True)
@@ -354,6 +359,57 @@ def list_models():
         "models": list(MODELS.keys()),
         "pipeline_default": {"step1": "mel_roformer", "step2": "mel_karaoke", "step3": "dereverb_mel"},
     }
+
+
+def serve_asset_file(path: Path, media_type: str):
+    if not path.exists():
+        raise HTTPException(404, f"Archivo no encontrado: {path.name}")
+    return FileResponse(str(path), media_type=media_type)
+
+
+@app.get(
+    "/models-explorer",
+    include_in_schema=False,
+    responses={404: {"description": "Archivo no encontrado"}},
+)
+def models_explorer_page():
+    return serve_asset_file(MODELS_EXPLORER_HTML, "text/html")
+
+
+@app.get(
+    "/models-explorer.html",
+    include_in_schema=False,
+    responses={404: {"description": "Archivo no encontrado"}},
+)
+def models_explorer_page_alias():
+    return models_explorer_page()
+
+
+@app.get(
+    "/models-explorer.css",
+    include_in_schema=False,
+    responses={404: {"description": "Archivo no encontrado"}},
+)
+def models_explorer_css():
+    return serve_asset_file(MODELS_EXPLORER_CSS, "text/css")
+
+
+@app.get(
+    "/models-explorer.js",
+    include_in_schema=False,
+    responses={404: {"description": "Archivo no encontrado"}},
+)
+def models_explorer_js():
+    return serve_asset_file(MODELS_EXPLORER_JS, "application/javascript")
+
+
+@app.get(
+    "/models.json",
+    include_in_schema=False,
+    responses={404: {"description": "Archivo no encontrado"}},
+)
+def models_explorer_data():
+    return serve_asset_file(MODELS_EXPLORER_JSON, "application/json")
 
 
 @app.post(

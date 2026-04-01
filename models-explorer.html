@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Models Explorer - Audio Separator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="models-explorer.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
+  <script src="models-explorer.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+
+  <main class="page">
+    <header class="hero card">
+      <div class="hero-main">
+        <p class="eyebrow">Audio Separator Intelligence</p>
+        <h1>Models Explorer</h1>
+        <p class="hero-copy">
+          Dashboard detallado para analizar <span id="totalModelsInline">-</span> modelos: metricas,
+          distribucion por arquitectura, cobertura por stem y comparaciones lado a lado.
+        </p>
+      </div>
+
+      <div class="hero-actions">
+        <button id="reloadBtn" class="btn btn-primary" type="button">Recargar models.json</button>
+        <label class="btn btn-secondary upload-btn" for="jsonUploadInput">
+          Cargar JSON custom
+          <input id="jsonUploadInput" type="file" accept="application/json" />
+        </label>
+        <p id="loadStatus" class="status">Esperando carga...</p>
+      </div>
+    </header>
+
+    <section class="card metric-guide">
+      <h2>Como leer las metricas</h2>
+      <div class="metric-grid">
+        <article>
+          <h3>SDR</h3>
+          <p>Signal to Distortion Ratio. Resume calidad global de separacion. Mas alto suele ser mejor.</p>
+        </article>
+        <article>
+          <h3>SIR</h3>
+          <p>Signal to Interference Ratio. Mide cuanto se elimina la mezcla de otras fuentes.</p>
+        </article>
+        <article>
+          <h3>SAR</h3>
+          <p>Signal to Artifacts Ratio. Evalua artefactos introducidos durante la separacion.</p>
+        </article>
+        <article>
+          <h3>ISR</h3>
+          <p>Image to Spatial distortion Ratio. Da pistas sobre conservacion de imagen espacial.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="card controls">
+      <h2>Filtros y enfoque</h2>
+
+      <div class="controls-grid">
+        <label>
+          Buscar modelo
+          <input id="searchInput" type="text" placeholder="friendly name o filename" />
+        </label>
+
+        <label>
+          Debe incluir stem
+          <select id="stemFilterSelect"></select>
+        </label>
+
+        <label>
+          Contexto para score
+          <select id="scoreStemSelect"></select>
+        </label>
+
+        <label>
+          Metrica principal
+          <select id="metricSelect">
+            <option value="SDR">SDR</option>
+            <option value="SIR">SIR</option>
+            <option value="SAR">SAR</option>
+            <option value="ISR">ISR</option>
+          </select>
+        </label>
+
+        <label>
+          Score minimo
+          <div class="range-wrap">
+            <input id="minMetricRange" type="range" min="-5" max="30" step="0.1" value="-5" />
+            <input id="minMetricNumber" type="number" min="-5" max="30" step="0.1" value="-5" />
+          </div>
+        </label>
+
+        <label>
+          Orden
+          <select id="sortSelect">
+            <option value="metric_desc">Score (desc)</option>
+            <option value="metric_asc">Score (asc)</option>
+            <option value="name_asc">Nombre A-Z</option>
+            <option value="name_desc">Nombre Z-A</option>
+            <option value="arch_name">Arquitectura + nombre</option>
+            <option value="stems_desc">Cantidad de stems</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="arch-filter-head">
+        <h3>Arquitecturas</h3>
+        <div class="inline-actions">
+          <button id="archAllBtn" class="btn btn-ghost" type="button">Seleccionar todas</button>
+          <button id="archNoneBtn" class="btn btn-ghost" type="button">Limpiar</button>
+          <button id="resetFiltersBtn" class="btn btn-ghost" type="button">Reset filtros</button>
+        </div>
+      </div>
+      <div id="archFilterGroup" class="arch-grid"></div>
+    </section>
+
+    <section class="stats-grid">
+      <article class="card stat-card">
+        <p class="label">Modelos visibles</p>
+        <p id="statVisible" class="value">-</p>
+      </article>
+      <article class="card stat-card">
+        <p class="label">Modelos totales</p>
+        <p id="statTotal" class="value">-</p>
+      </article>
+      <article class="card stat-card">
+        <p class="label">Arquitecturas visibles</p>
+        <p id="statArch" class="value">-</p>
+      </article>
+      <article class="card stat-card">
+        <p class="label">Stems unicos visibles</p>
+        <p id="statStems" class="value">-</p>
+      </article>
+      <article class="card stat-card">
+        <p class="label">Promedio metrica</p>
+        <p id="statMetricAvg" class="value">-</p>
+      </article>
+      <article class="card stat-card">
+        <p class="label">Cobertura metrica</p>
+        <p id="statCoverage" class="value">-</p>
+      </article>
+    </section>
+
+    <section class="charts-grid">
+      <article class="card chart-card">
+        <h2>Distribucion por arquitectura</h2>
+        <canvas id="archChart"></canvas>
+      </article>
+
+      <article class="card chart-card">
+        <h2>Cobertura por stem</h2>
+        <canvas id="stemChart"></canvas>
+      </article>
+
+      <article class="card chart-card">
+        <h2>Top modelos por metrica</h2>
+        <canvas id="topModelsChart"></canvas>
+      </article>
+    </section>
+
+    <section class="card table-card">
+      <div class="table-toolbar">
+        <div>
+          <h2>Catalogo de modelos</h2>
+          <p id="tableSummary" class="muted">-</p>
+        </div>
+        <div class="table-tools-right">
+          <label>
+            Filas por pagina
+            <select id="pageSizeSelect">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
+          </label>
+          <div class="pager">
+            <button id="prevPageBtn" class="btn btn-ghost" type="button">Prev</button>
+            <span id="pageIndicator">1 / 1</span>
+            <button id="nextPageBtn" class="btn btn-ghost" type="button">Next</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="modelsTable">
+          <thead>
+            <tr>
+              <th>Comparar</th>
+              <th>Friendly name</th>
+              <th>Arch</th>
+              <th>Filename</th>
+              <th>Stems</th>
+              <th>Target</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody id="modelsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="detail-grid">
+      <article class="card detail-card">
+        <h2>Detalle de modelo</h2>
+        <div id="modelDetailEmpty" class="muted">Selecciona un modelo de la tabla para ver detalle.</div>
+        <div id="modelDetailContent" class="detail-content hidden"></div>
+      </article>
+
+      <article class="card compare-card">
+        <div class="compare-head">
+          <h2>Comparador</h2>
+          <p class="muted">Selecciona modelos con el boton "Comparar" de la tabla.</p>
+        </div>
+
+        <div class="compare-controls">
+          <label>
+            Stem para comparar
+            <select id="compareStemSelect"></select>
+          </label>
+          <label>
+            Metrica
+            <select id="compareMetricSelect">
+              <option value="SDR">SDR</option>
+              <option value="SIR">SIR</option>
+              <option value="SAR">SAR</option>
+              <option value="ISR">ISR</option>
+            </select>
+          </label>
+          <button id="clearCompareBtn" class="btn btn-ghost" type="button">Limpiar seleccion</button>
+        </div>
+
+        <div id="compareSelection" class="compare-selection"></div>
+
+        <canvas id="compareChart"></canvas>
+
+        <div>
+          <h3>Ranking de comparacion</h3>
+          <ol id="compareRanking" class="ranking"></ol>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

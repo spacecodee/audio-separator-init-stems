@@ -9,3 +9,6 @@ output/*
 !output/.gitkeep
 
 models_list.json
+
+# Python cache artifacts
+__pycache__/
