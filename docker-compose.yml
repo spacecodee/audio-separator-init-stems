@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   stem-separator:
     build:
@@ -17,9 +15,9 @@ services:
               capabilities: [gpu]
     volumes:
       - ./main.py:/app/main.py
-      - ./input:/app/input        # Sube aquí los archivos de audio
-      - ./output:/app/output      # Los stems separados se guardan aquí
-      - ./models:/root/.cache/audio-separator  # Cache de modelos (evita re-descargas)
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./models:/root/.cache/audio-separator
     ports:
       - "8000:8000"
     environment:
