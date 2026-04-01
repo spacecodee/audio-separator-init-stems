@@ -1,0 +1,9 @@
+# Ignore all files in input, models, and output folders except .gitkeep
+input/*
+!input/.gitkeep
+
+models/*
+!models/.gitkeep
+
+output/*
+!output/.gitkeep
