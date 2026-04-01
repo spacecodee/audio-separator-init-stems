@@ -149,17 +149,23 @@
     <section class="charts-grid">
       <article class="card chart-card">
         <h2>Distribucion por arquitectura</h2>
-        <canvas id="archChart"></canvas>
+        <div class="chart-frame">
+          <canvas id="archChart"></canvas>
+        </div>
       </article>
 
       <article class="card chart-card">
         <h2>Cobertura por stem</h2>
-        <canvas id="stemChart"></canvas>
+        <div class="chart-frame">
+          <canvas id="stemChart"></canvas>
+        </div>
       </article>
 
       <article class="card chart-card">
         <h2>Top modelos por metrica</h2>
-        <canvas id="topModelsChart"></canvas>
+        <div class="chart-frame">
+          <canvas id="topModelsChart"></canvas>
+        </div>
       </article>
     </section>
 
@@ -237,7 +243,9 @@
 
         <div id="compareSelection" class="compare-selection"></div>
 
-        <canvas id="compareChart"></canvas>
+        <div class="compare-chart-frame">
+          <canvas id="compareChart"></canvas>
+        </div>
 
         <div>
           <h3>Ranking de comparacion</h3>

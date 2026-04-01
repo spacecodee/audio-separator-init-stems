@@ -701,9 +701,18 @@ function chartBaseOptions(extra) {
 }
 
 function updateChart(currentChart, canvas, config) {
-  if (currentChart) {
-    currentChart.destroy();
+  if (!canvas) {
+    return currentChart;
   }
+
+  if (currentChart) {
+    currentChart.config.type = config.type;
+    currentChart.data = config.data;
+    currentChart.options = config.options;
+    currentChart.update();
+    return currentChart;
+  }
+
   return new globalThis.Chart(canvas, config);
 }
 
@@ -804,7 +813,7 @@ function renderModelDetails() {
       <div class="kv-item"><p class="k">Architecture</p><p class="v mono">${escapeHtml(model.arch)}</p></div>
       <div class="kv-item"><p class="k">Filename</p><p class="v mono">${escapeHtml(model.filename || "-")}</p></div>
       <div class="kv-item"><p class="k">Target stem</p><p class="v">${escapeHtml(model.targetStem || "-")}</p></div>
-      <div class="kv-item"><p class="k">Stems</p><p class="v">${renderChips(model.stems)}</p></div>
+      <div class="kv-item"><p class="k">Stems</p><div class="v">${renderChips(model.stems)}</div></div>
       <div class="kv-item"><p class="k">Best SDR</p><p class="v mono">${formatMaybe(model.bestByMetric.SDR)}</p></div>
     </div>
 

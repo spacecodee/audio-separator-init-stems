@@ -290,11 +290,32 @@ button:focus {
 
 .chart-card {
   min-height: 360px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 8px;
 }
 
-.chart-card canvas {
+.chart-frame,
+.compare-chart-frame {
+  position: relative;
+  width: 100%;
+}
+
+.chart-frame {
   width: 100%;
   height: 300px;
+}
+
+.compare-chart-frame {
+  height: 260px;
+  margin-bottom: 10px;
+}
+
+.chart-frame canvas,
+.compare-chart-frame canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .table-card {
@@ -497,12 +518,6 @@ tbody tr.active {
   color: #ffd89a;
   cursor: pointer;
   font-size: 12px;
-}
-
-#compareChart {
-  width: 100%;
-  height: 260px;
-  margin-bottom: 10px;
 }
 
 .ranking {
