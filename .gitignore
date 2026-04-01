@@ -7,3 +7,5 @@ models/*
 
 output/*
 !output/.gitkeep
+
+models_list.json

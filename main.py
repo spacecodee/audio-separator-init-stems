@@ -7,7 +7,7 @@ import shutil
 import uuid
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Annotated
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, HTMLResponse
@@ -59,7 +59,7 @@ def make_separator(output_dir: Path):
     )
 
 
-def classify_stem(name: str) -> str:
+def classify_stem(name: str) -> str | None:
     n = name.lower()
     if "instrumental" in n:
         return "instrumental"
@@ -74,7 +74,7 @@ def classify_stem(name: str) -> str:
     return None
 
 
-def rename_stems(files: list, step_dir: Path, prefix: str) -> dict:
+def rename_stems(step_dir: Path, prefix: str) -> dict:
     """Busca TODOS los wav en step_dir y los renombra a nombres cortos predecibles."""
     all_wavs = list(step_dir.glob("*.wav"))
     logger.info(f"[rename_stems] WAVs en {step_dir}: {[f.name for f in all_wavs]}")
@@ -100,8 +100,8 @@ def run_separation(job_id: str, file_path: Path, model_key: str, output_format: 
         sep = make_separator(job_out)
         sep.output_format = output_format
         sep.load_model(MODELS.get(model_key, MODELS["mel_roformer"]))
-        result = sep.separate(str(file_path))
-        stems = rename_stems(result, job_out, "s1")
+        sep.separate(str(file_path))
+        stems = rename_stems(job_out, "s1")
         jobs[job_id]["status"] = "done"
         jobs[job_id]["files"] = {k: v.name for k, v in stems.items()}
     except Exception as e:
@@ -128,8 +128,8 @@ def run_pipeline(job_id: str, file_path: Path, output_format: str,
         # Paso 1: vocal vs instrumental
         jobs[job_id]["pipeline"]["step1"] = "running"
         sep.load_model(MODELS[step1_model])
-        step1_out = sep.separate(str(file_path))
-        step1_stems = rename_stems(step1_out, step_dirs[1], "s1")
+        sep.separate(str(file_path))
+        step1_stems = rename_stems(step_dirs[1], "s1")
         jobs[job_id]["pipeline"]["step1"] = {k: v.name for k, v in step1_stems.items()}
 
         vocals_path = step1_stems.get("vocals")
@@ -142,8 +142,8 @@ def run_pipeline(job_id: str, file_path: Path, output_format: str,
         jobs[job_id]["pipeline"]["step2"] = "running"
         sep.output_dir = str(step_dirs[2])
         sep.load_model(MODELS[step2_model])
-        step2_out = sep.separate(str(vocals_path))
-        step2_stems = rename_stems(step2_out, step_dirs[2], "s2")
+        sep.separate(str(vocals_path))
+        step2_stems = rename_stems(step_dirs[2], "s2")
         jobs[job_id]["pipeline"]["step2"] = {k: v.name for k, v in step2_stems.items()}
 
         lead_path = step2_stems.get("vocals")
@@ -156,8 +156,8 @@ def run_pipeline(job_id: str, file_path: Path, output_format: str,
         jobs[job_id]["pipeline"]["step3"] = "running"
         sep.output_dir = str(step_dirs[3])
         sep.load_model(MODELS[step3_model])
-        step3_out = sep.separate(str(lead_path))
-        step3_stems = rename_stems(step3_out, step_dirs[3], "s3")
+        sep.separate(str(lead_path))
+        step3_stems = rename_stems(step_dirs[3], "s3")
         jobs[job_id]["pipeline"]["step3"] = {k: v.name for k, v in step3_stems.items()}
 
         jobs[job_id]["status"] = "done"
@@ -270,12 +270,16 @@ def list_models():
     }
 
 
-@app.post("/separate", summary="Separar con un modelo (asíncrono)")
+@app.post(
+    "/separate",
+    summary="Separar con un modelo (asíncrono)",
+    responses={400: {"description": "Parámetros inválidos"}},
+)
 async def separate(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(..., description="Archivo de audio (mp3, wav, flac)"),
-    model: str = Form(default="mel_roformer", description="Modelo a usar"),
-    output_format: str = Form(default="wav", description="Formato salida: wav, flac, mp3"),
+    file: Annotated[UploadFile, File(..., description="Archivo de audio (mp3, wav, flac)")],
+    model: Annotated[str, Form(description="Modelo a usar")] = "mel_roformer",
+    output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
 ):
     if model not in MODELS:
         raise HTTPException(400, f"Modelo inválido. Opciones: {list(MODELS.keys())}")
@@ -290,14 +294,18 @@ async def separate(
     return {"job_id": job_id, "status": "queued", "model": model}
 
 
-@app.post("/separate/pipeline", summary="Pipeline 3 pasos: stem → backing → de-reverb")
+@app.post(
+    "/separate/pipeline",
+    summary="Pipeline 3 pasos: stem → backing → de-reverb",
+    responses={400: {"description": "Parámetros inválidos"}},
+)
 async def separate_pipeline(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(..., description="Archivo de audio (mp3, wav, flac)"),
-    step1_model: str = Form(default="mel_roformer", description="Paso 1 — vocal/instrumental"),
-    step2_model: str = Form(default="mel_karaoke",  description="Paso 2 — lead vs backing vocals"),
-    step3_model: str = Form(default="dereverb_mel", description="Paso 3 — de-reverb/de-echo"),
-    output_format: str = Form(default="wav",        description="Formato salida: wav, flac, mp3"),
+    file: Annotated[UploadFile, File(..., description="Archivo de audio (mp3, wav, flac)")],
+    step1_model: Annotated[str, Form(description="Paso 1 — vocal/instrumental")] = "mel_roformer",
+    step2_model: Annotated[str, Form(description="Paso 2 — lead vs backing vocals")] = "mel_karaoke",
+    step3_model: Annotated[str, Form(description="Paso 3 — de-reverb/de-echo")] = "dereverb_mel",
+    output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
 ):
     for key, val in [("step1_model", step1_model), ("step2_model", step2_model), ("step3_model", step3_model)]:
         if val not in MODELS:
@@ -313,7 +321,11 @@ async def separate_pipeline(
             "pipeline": {"step1": step1_model, "step2": step2_model, "step3": step3_model}}
 
 
-@app.get("/jobs/{job_id}", summary="Estado de un job")
+@app.get(
+    "/jobs/{job_id}",
+    summary="Estado de un job",
+    responses={404: {"description": "Job no encontrado"}},
+)
 def get_job(job_id: str):
     if job_id not in jobs:
         raise HTTPException(404, "Job no encontrado")
@@ -325,7 +337,11 @@ def list_jobs():
     return {"total": len(jobs), "jobs": {jid: j["status"] for jid, j in jobs.items()}}
 
 
-@app.get("/download/{job_id}/{filename}", summary="Descargar stem resultante")
+@app.get(
+    "/download/{job_id}/{filename}",
+    summary="Descargar stem resultante",
+    responses={404: {"description": "Archivo no encontrado"}},
+)
 def download_file(job_id: str, filename: str):
     for step in ["step1", "step2", "step3"]:
         path = OUTPUT_DIR / job_id / step / filename
@@ -334,7 +350,11 @@ def download_file(job_id: str, filename: str):
     raise HTTPException(404, f"Archivo '{filename}' no encontrado en job '{job_id}'")
 
 
-@app.delete("/jobs/{job_id}", summary="Eliminar job y sus archivos")
+@app.delete(
+    "/jobs/{job_id}",
+    summary="Eliminar job y sus archivos",
+    responses={404: {"description": "Job no encontrado"}},
+)
 def delete_job(job_id: str):
     if job_id not in jobs:
         raise HTTPException(404, "Job no encontrado")
