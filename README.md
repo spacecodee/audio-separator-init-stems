@@ -2,15 +2,16 @@
 
 Proyecto: API y contenedor para separar stems usando `audio-separator` (UVR/MelBand-RoFormer, MDX, Demucs, etc.).
 
-Este repositorio contiene una pequeña API FastAPI (`main.py`) que orquesta un pipeline de 3 pasos (separación → backing vocals → de-reverb) y un `Dockerfile` + `docker-compose.yml` para ejecutarlo en contenedor (GPU opcional).
+Este repositorio contiene una pequeña API FastAPI (`main.py`) que orquesta separación por modelos, pipeline de 3 pasos y flujos especializados (guitarra, reconstrucción vocal y split hombre/mujer), además de `Dockerfile` + `docker-compose.yml` para ejecutarlo en contenedor (GPU opcional).
 
 ## Estructura relevante
 
-- `main.py` — FastAPI que expone endpoints `/separate` y `/separate/pipeline`.
+- `main.py` — FastAPI con endpoints de separación, pipelines y gestión de jobs.
 - `Dockerfile` — imagen que instala `audio-separator` y levanta `uvicorn main:app`.
 - `docker-compose.yml` — servicio `stem-separator` (nombre del servicio y `container_name: stem-separator`).
 - `input/`, `models/`, `output/` — carpetas montadas en el contenedor (vacías en el repo).
 - `export_models_json.sh` — script auxiliar para exportar el listado de modelos a JSON.
+- `scripts/` — un script bash por endpoint de la API.
 
 ## Quickstart (Docker Compose)
 
@@ -137,6 +138,36 @@ curl -X POST "http://localhost:8000/separate/pipeline" \
   -F "output_format=wav"
 ```
 
+- Pipeline guitarra (extraer guitarra + dereverb):
+
+```bash
+curl -X POST "http://localhost:8000/separate/guitar/pipeline" \
+  -F "file=@./input/song.wav" \
+  -F "split_model=htdemucs_6s" \
+  -F "dereverb_model=dereverb_mel" \
+  -F "output_format=wav"
+```
+
+- Reconstrucción de voces:
+
+```bash
+curl -X POST "http://localhost:8000/separate/vocals/reconstruct" \
+  -F "file=@./input/song.wav" \
+  -F "extract_model=mel_roformer" \
+  -F "reconstruct_model=vocals_resurrection" \
+  -F "output_format=wav"
+```
+
+- Split de voces hombre/mujer:
+
+```bash
+curl -X POST "http://localhost:8000/separate/vocals/male-female" \
+  -F "file=@./input/song.wav" \
+  -F "extract_model=mel_roformer" \
+  -F "split_model=chorus_male_female" \
+  -F "output_format=wav"
+```
+
 - Consultar estado del job:
 
 ```bash
@@ -154,6 +185,51 @@ curl -O http://localhost:8000/download/<JOB_ID>/<filename.wav>
 ```bash
 curl -X DELETE http://localhost:8000/jobs/<JOB_ID>
 ```
+
+## Scripts bash por endpoint
+
+Todos los scripts viven en `./scripts` y ya vienen listos para ejecutar.
+
+Preparacion:
+
+```bash
+cd /teamspace/studios/this_studio/audio-separator-init-stems
+chmod +x scripts/*.bash
+```
+
+Endpoints de lectura/metadata:
+
+- `scripts/endpoint_root.bash` → `GET /`
+- `scripts/endpoint_models.bash` → `GET /models`
+- `scripts/endpoint_docs.bash` → `GET /docs`
+- `scripts/endpoint_openapi_json.bash` → `GET /openapi.json`
+- `scripts/endpoint_models_explorer.bash` → `GET /models-explorer`
+- `scripts/endpoint_models_explorer_html.bash` → `GET /models-explorer.html`
+- `scripts/endpoint_models_explorer_css.bash` → `GET /models-explorer.css`
+- `scripts/endpoint_models_explorer_js.bash` → `GET /models-explorer.js`
+- `scripts/endpoint_models_json.bash` → `GET /models.json`
+- `scripts/endpoint_jobs_list.bash` → `GET /jobs`
+
+Endpoints asíncronos de separación:
+
+- `scripts/endpoint_separate.bash` → `POST /separate`
+- `scripts/endpoint_separate_pipeline.bash` → `POST /separate/pipeline`
+- `scripts/endpoint_separate_guitar_pipeline.bash` → `POST /separate/guitar/pipeline`
+- `scripts/endpoint_separate_vocals_reconstruct.bash` → `POST /separate/vocals/reconstruct`
+- `scripts/endpoint_separate_vocals_male_female.bash` → `POST /separate/vocals/male-female`
+
+Endpoints de job/resultados:
+
+- `scripts/endpoint_job_status.bash` → `GET /jobs/{job_id}`
+- `scripts/endpoint_download.bash` → `GET /download/{job_id}/{filename}`
+- `scripts/endpoint_job_delete.bash` → `DELETE /jobs/{job_id}`
+
+Variables de entorno utiles en scripts (segun el caso):
+
+- `BASE` (default: `http://localhost:8000`)
+- `AUDIO` (default: `/teamspace/studios/this_studio/audio/Audio03.wav`)
+- `OUTPUT_FORMAT` (`wav|flac|mp3`)
+- `POLL_SECONDS` (default: `5`)
 
 ## Exportar listado de modelos a JSON (script)
 

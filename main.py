@@ -137,6 +137,25 @@ MODELS = {
     "vocals_revive": "bs_roformer_vocals_revive_unwa.ckpt",
 }
 
+VALID_OUTPUT_FORMATS = {"wav", "flac", "mp3"}
+GUITAR_SOURCE_MODELS = {"htdemucs_6s"}
+GUITAR_DEREVERB_MODELS = {
+    "dereverb_mel",
+    "dereverb_mel_la",
+    "dereverb_mel_mono",
+    "dereverb_mel_big",
+    "dereverb_mel_sbig",
+    "dereverb_bs",
+    "dereverb_vr",
+    "dereverb_mdx23c",
+    "dereverb_echo",
+    "dereverb_echo_fused",
+    "dereverb_echo_v1",
+    "deecho_dereverb_vr",
+}
+VOCAL_RECONSTRUCT_MODELS = {"vocals_resurrection", "vocals_revive"}
+VOCAL_GENDER_SPLIT_MODELS = {"chorus_male_female", "male_female_aufr33"}
+
 jobs: dict = {}
 
 
@@ -150,32 +169,70 @@ def make_separator(output_dir: Path):
     )
 
 
+def validate_output_format(output_format: str):
+    if output_format not in VALID_OUTPUT_FORMATS:
+        allowed = ", ".join(sorted(VALID_OUTPUT_FORMATS))
+        raise HTTPException(400, f"output_format debe ser: {allowed}")
+
+
+def validate_model_key(field_name: str, model_key: str, allowed_models: set[str] | None = None):
+    if model_key not in MODELS:
+        raise HTTPException(400, f"{field_name} inválido. Opciones: {list(MODELS.keys())}")
+    if allowed_models and model_key not in allowed_models:
+        raise HTTPException(400, f"{field_name} inválido para este endpoint. Opciones: {sorted(allowed_models)}")
+
+
+def find_stem(stems: dict, preferred_keys: list[str]) -> Path | None:
+    for key in preferred_keys:
+        path = stems.get(key)
+        if path and path.exists():
+            return path
+    return None
+
+
+def require_stem(stems: dict, preferred_keys: list[str], message_prefix: str) -> Path:
+    path = find_stem(stems, preferred_keys)
+    if path:
+        return path
+    raise FileNotFoundError(f"{message_prefix}. Stems: {list(stems.keys())}")
+
+
 def classify_stem(name: str) -> str | None:
     n = name.lower()
-    if "instrumental" in n:
-        return "instrumental"
-    if "backing" in n or "no_vocals" in n or "novocal" in n:
-        return "backing"
-    if "dry" in n or "no_reverb" in n or "norev" in n:
-        return "dry"
-    if "reverb" in n or "wet" in n:
-        return "reverb"
-    if "vocal" in n or "voice" in n:
-        return "vocals"
+    patterns = [
+        ("guitar", ("guitar", "gtr")),
+        ("drums", ("drum", "perc")),
+        ("bass", ("bass",)),
+        ("piano", ("piano", "keys")),
+        ("other", ("other", "rest")),
+        ("female", ("female", "femme")),
+        ("male", ("male", "masc")),
+        ("instrumental", ("instrumental",)),
+        ("backing", ("backing", "no_vocals", "novocal")),
+        ("dry", ("dry", "no_reverb", "norev")),
+        ("reverb", ("reverb", "wet")),
+        ("vocals", ("vocal", "voice")),
+    ]
+    for stem_key, tokens in patterns:
+        if any(token in n for token in tokens):
+            return stem_key
     return None
 
 
 def rename_stems(step_dir: Path, prefix: str) -> dict:
-    """Busca TODOS los wav en step_dir y los renombra a nombres cortos predecibles."""
-    all_wavs = list(step_dir.glob("*.wav"))
-    logger.info(f"[rename_stems] WAVs en {step_dir}: {[f.name for f in all_wavs]}")
+    """Busca audios de salida en step_dir y los renombra a nombres cortos predecibles."""
+    all_audio = []
+    for ext in ("wav", "flac", "mp3"):
+        all_audio.extend(step_dir.glob(f"*.{ext}"))
+
+    logger.info(f"[rename_stems] audios en {step_dir}: {[f.name for f in all_audio]}")
 
     renamed = {}
-    for src in all_wavs:
+    for src in all_audio:
         key = classify_stem(src.name) or f"stem{len(renamed)}"
-        dst = step_dir / f"{prefix}_{key}.wav"
+        dst = step_dir / f"{prefix}_{key}{src.suffix}"
         if dst.exists() and dst != src:
-            dst = step_dir / f"{prefix}_{key}_{src.stem[-6:]}.wav"
+            dst = step_dir / f"{prefix}_{key}_{src.stem[-6:]}{src.suffix}"
         src.rename(dst)
         renamed[key] = dst
         logger.info(f"  {src.name} → {dst.name}")
@@ -262,6 +319,181 @@ def run_pipeline(job_id: str, file_path: Path, output_format: str,
 
     except Exception as e:
         logger.error(f"[{job_id}] Pipeline error: {e}")
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["error"] = str(e)
+    finally:
+        file_path.unlink(missing_ok=True)
+
+
+def run_guitar_pipeline(job_id: str, file_path: Path, output_format: str,
+                        split_model: str, dereverb_model: str):
+    step_dirs = {i: OUTPUT_DIR / job_id / f"step{i}" for i in range(1, 3)}
+    for d in step_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+
+    jobs[job_id]["status"] = "processing"
+    jobs[job_id]["pipeline"] = {}
+
+    try:
+        sep = make_separator(step_dirs[1])
+        sep.output_format = output_format
+
+        # Paso 1: separar guitarra del mix
+        jobs[job_id]["pipeline"]["step1"] = "running"
+        sep.load_model(MODELS[split_model])
+        sep.separate(str(file_path))
+        step1_stems = rename_stems(step_dirs[1], "s1")
+        jobs[job_id]["pipeline"]["step1"] = {k: v.name for k, v in step1_stems.items()}
+
+        guitar_raw_path = require_stem(
+            step1_stems,
+            ["guitar"],
+            "No se encontró stem guitar en paso 1",
+        )
+        other_ref_path = find_stem(step1_stems, ["other"])
+
+        # Paso 2: limpiar reverb de la guitarra
+        jobs[job_id]["pipeline"]["step2"] = "running"
+        sep.output_dir = str(step_dirs[2])
+        sep.load_model(MODELS[dereverb_model])
+        sep.separate(str(guitar_raw_path))
+        step2_stems = rename_stems(step_dirs[2], "s2")
+        jobs[job_id]["pipeline"]["step2"] = {k: v.name for k, v in step2_stems.items()}
+
+        guitar_clean_path = find_stem(step2_stems, ["dry", "guitar", "vocals", "instrumental"])
+        if not guitar_clean_path and step2_stems:
+            guitar_clean_path = next(iter(step2_stems.values()))
+        if not guitar_clean_path:
+            raise FileNotFoundError(
+                f"No se encontró stem limpio en paso 2. Stems: {list(step2_stems.keys())}"
+            )
+
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["summary"] = {
+            "guitar_raw": guitar_raw_path.name,
+            "guitar_clean": guitar_clean_path.name,
+            "other_reference": other_ref_path.name if other_ref_path else None,
+        }
+        jobs[job_id]["download_base"] = f"/download/{job_id}"
+
+    except Exception as e:
+        logger.error(f"[{job_id}] Guitar pipeline error: {e}")
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["error"] = str(e)
+    finally:
+        file_path.unlink(missing_ok=True)
+
+
+def run_vocals_reconstruct(job_id: str, file_path: Path, output_format: str,
+                           extract_model: str, reconstruct_model: str):
+    step_dirs = {i: OUTPUT_DIR / job_id / f"step{i}" for i in range(1, 3)}
+    for d in step_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+
+    jobs[job_id]["status"] = "processing"
+    jobs[job_id]["pipeline"] = {}
+
+    try:
+        sep = make_separator(step_dirs[1])
+        sep.output_format = output_format
+
+        # Paso 1: extraer vocal principal
+        jobs[job_id]["pipeline"]["step1"] = "running"
+        sep.load_model(MODELS[extract_model])
+        sep.separate(str(file_path))
+        step1_stems = rename_stems(step_dirs[1], "s1")
+        jobs[job_id]["pipeline"]["step1"] = {k: v.name for k, v in step1_stems.items()}
+
+        vocals_path = require_stem(
+            step1_stems,
+            ["vocals"],
+            "No se encontró stem vocals en paso 1",
+        )
+
+        # Paso 2: reconstruir/recuperar voces
+        jobs[job_id]["pipeline"]["step2"] = "running"
+        sep.output_dir = str(step_dirs[2])
+        sep.load_model(MODELS[reconstruct_model])
+        sep.separate(str(vocals_path))
+        step2_stems = rename_stems(step_dirs[2], "s2")
+        jobs[job_id]["pipeline"]["step2"] = {k: v.name for k, v in step2_stems.items()}
+
+        vocals_rebuilt_path = find_stem(step2_stems, ["vocals", "dry"])
+        if not vocals_rebuilt_path and step2_stems:
+            vocals_rebuilt_path = next(iter(step2_stems.values()))
+        if not vocals_rebuilt_path:
+            raise FileNotFoundError(
+                f"No se encontró stem reconstruido en paso 2. Stems: {list(step2_stems.keys())}"
+            )
+
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["summary"] = {
+            "vocals_raw": vocals_path.name,
+            "vocals_reconstructed": vocals_rebuilt_path.name,
+            "instrumental_reference": step1_stems.get("instrumental").name if step1_stems.get("instrumental") else None,
+        }
+        jobs[job_id]["download_base"] = f"/download/{job_id}"
+
+    except Exception as e:
+        logger.error(f"[{job_id}] Vocals reconstruct error: {e}")
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["error"] = str(e)
+    finally:
+        file_path.unlink(missing_ok=True)
+
+
+def run_vocals_gender_split(job_id: str, file_path: Path, output_format: str,
+                            extract_model: str, split_model: str):
+    step_dirs = {i: OUTPUT_DIR / job_id / f"step{i}" for i in range(1, 3)}
+    for d in step_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+
+    jobs[job_id]["status"] = "processing"
+    jobs[job_id]["pipeline"] = {}
+
+    try:
+        sep = make_separator(step_dirs[1])
+        sep.output_format = output_format
+
+        # Paso 1: extraer vocal principal
+        jobs[job_id]["pipeline"]["step1"] = "running"
+        sep.load_model(MODELS[extract_model])
+        sep.separate(str(file_path))
+        step1_stems = rename_stems(step_dirs[1], "s1")
+        jobs[job_id]["pipeline"]["step1"] = {k: v.name for k, v in step1_stems.items()}
+
+        vocals_path = require_stem(
+            step1_stems,
+            ["vocals"],
+            "No se encontró stem vocals en paso 1",
+        )
+
+        # Paso 2: split hombre / mujer
+        jobs[job_id]["pipeline"]["step2"] = "running"
+        sep.output_dir = str(step_dirs[2])
+        sep.load_model(MODELS[split_model])
+        sep.separate(str(vocals_path))
+        step2_stems = rename_stems(step_dirs[2], "s2")
+        jobs[job_id]["pipeline"]["step2"] = {k: v.name for k, v in step2_stems.items()}
+
+        male_path = find_stem(step2_stems, ["male"])
+        female_path = find_stem(step2_stems, ["female"])
+
+        if not male_path and not female_path:
+            raise FileNotFoundError(
+                f"No se encontraron stems male/female en paso 2. Stems: {list(step2_stems.keys())}"
+            )
+
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["summary"] = {
+            "vocals_raw": vocals_path.name,
+            "male_vocals": male_path.name if male_path else None,
+            "female_vocals": female_path.name if female_path else None,
+        }
+        jobs[job_id]["download_base"] = f"/download/{job_id}"
+
+    except Exception as e:
+        logger.error(f"[{job_id}] Vocals male/female error: {e}")
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"] = str(e)
     finally:
@@ -358,6 +590,9 @@ def list_models():
     return {
         "models": list(MODELS.keys()),
         "pipeline_default": {"step1": "mel_roformer", "step2": "mel_karaoke", "step3": "dereverb_mel"},
+        "guitar_pipeline_default": {"step1": "htdemucs_6s", "step2": "dereverb_mel"},
+        "vocals_reconstruct_default": {"step1": "mel_roformer", "step2": "vocals_resurrection"},
+        "vocals_male_female_default": {"step1": "mel_roformer", "step2": "chorus_male_female"},
     }
 
 
@@ -423,10 +658,8 @@ async def separate(
     model: Annotated[str, Form(description="Modelo a usar")] = "mel_roformer",
     output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
 ):
-    if model not in MODELS:
-        raise HTTPException(400, f"Modelo inválido. Opciones: {list(MODELS.keys())}")
-    if output_format not in ("wav", "flac", "mp3"):
-        raise HTTPException(400, "output_format debe ser wav, flac o mp3")
+    validate_model_key("model", model)
+    validate_output_format(output_format)
     job_id = str(uuid.uuid4())
     dest = INPUT_DIR / f"{job_id}.wav"
     with dest.open("wb") as fh:
@@ -449,9 +682,10 @@ async def separate_pipeline(
     step3_model: Annotated[str, Form(description="Paso 3 — de-reverb/de-echo")] = "dereverb_mel",
     output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
 ):
-    for key, val in [("step1_model", step1_model), ("step2_model", step2_model), ("step3_model", step3_model)]:
-        if val not in MODELS:
-            raise HTTPException(400, f"{key} inválido. Opciones: {list(MODELS.keys())}")
+    validate_output_format(output_format)
+    validate_model_key("step1_model", step1_model)
+    validate_model_key("step2_model", step2_model)
+    validate_model_key("step3_model", step3_model)
     job_id = str(uuid.uuid4())
     dest = INPUT_DIR / f"{job_id}.wav"
     with dest.open("wb") as fh:
@@ -461,6 +695,128 @@ async def separate_pipeline(
                                step1_model, step2_model, step3_model)
     return {"job_id": job_id, "status": "queued",
             "pipeline": {"step1": step1_model, "step2": step2_model, "step3": step3_model}}
+
+
+@app.post(
+    "/separate/guitar/pipeline",
+    summary="Separar guitarra + limpiar reverb",
+    responses={400: {"description": "Parámetros inválidos"}},
+)
+async def separate_guitar_pipeline(
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File(..., description="Archivo de audio (mp3, wav, flac)")],
+    split_model: Annotated[str, Form(description="Modelo para extraer guitarra")] = "htdemucs_6s",
+    dereverb_model: Annotated[str, Form(description="Modelo para limpiar reverb en guitarra")] = "dereverb_mel",
+    output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
+):
+    validate_output_format(output_format)
+    validate_model_key("split_model", split_model, GUITAR_SOURCE_MODELS)
+    validate_model_key("dereverb_model", dereverb_model, GUITAR_DEREVERB_MODELS)
+
+    job_id = str(uuid.uuid4())
+    dest = INPUT_DIR / f"{job_id}.wav"
+    with dest.open("wb") as fh:
+        shutil.copyfileobj(file.file, fh)
+
+    jobs[job_id] = {
+        "status": "queued",
+        "type": "guitar_pipeline",
+        "pipeline": {},
+        "models": {"split_model": split_model, "dereverb_model": dereverb_model},
+    }
+    background_tasks.add_task(run_guitar_pipeline, job_id, dest, output_format, split_model, dereverb_model)
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "pipeline": {"step1": split_model, "step2": dereverb_model},
+    }
+
+
+@app.post(
+    "/separate/vocals/reconstruct",
+    summary="Reconstruir voces",
+    responses={400: {"description": "Parámetros inválidos"}},
+)
+async def separate_vocals_reconstruct(
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File(..., description="Archivo de audio (mp3, wav, flac)")],
+    extract_model: Annotated[str, Form(description="Modelo para extraer vocal principal")] = "mel_roformer",
+    reconstruct_model: Annotated[str, Form(description="Modelo para reconstruir voces")] = "vocals_resurrection",
+    output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
+):
+    validate_output_format(output_format)
+    validate_model_key("extract_model", extract_model)
+    validate_model_key("reconstruct_model", reconstruct_model, VOCAL_RECONSTRUCT_MODELS)
+
+    job_id = str(uuid.uuid4())
+    dest = INPUT_DIR / f"{job_id}.wav"
+    with dest.open("wb") as fh:
+        shutil.copyfileobj(file.file, fh)
+
+    jobs[job_id] = {
+        "status": "queued",
+        "type": "vocals_reconstruct",
+        "pipeline": {},
+        "models": {"extract_model": extract_model, "reconstruct_model": reconstruct_model},
+    }
+    background_tasks.add_task(
+        run_vocals_reconstruct,
+        job_id,
+        dest,
+        output_format,
+        extract_model,
+        reconstruct_model,
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "pipeline": {"step1": extract_model, "step2": reconstruct_model},
+    }
+
+
+@app.post(
+    "/separate/vocals/male-female",
+    summary="Separar voces por hombre/mujer",
+    responses={400: {"description": "Parámetros inválidos"}},
+)
+async def separate_vocals_male_female(
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File(..., description="Archivo de audio (mp3, wav, flac)")],
+    extract_model: Annotated[str, Form(description="Modelo para extraer vocal principal")] = "mel_roformer",
+    split_model: Annotated[str, Form(description="Modelo para split hombre/mujer")] = "chorus_male_female",
+    output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
+):
+    validate_output_format(output_format)
+    validate_model_key("extract_model", extract_model)
+    validate_model_key("split_model", split_model, VOCAL_GENDER_SPLIT_MODELS)
+
+    job_id = str(uuid.uuid4())
+    dest = INPUT_DIR / f"{job_id}.wav"
+    with dest.open("wb") as fh:
+        shutil.copyfileobj(file.file, fh)
+
+    jobs[job_id] = {
+        "status": "queued",
+        "type": "vocals_male_female",
+        "pipeline": {},
+        "models": {"extract_model": extract_model, "split_model": split_model},
+    }
+    background_tasks.add_task(
+        run_vocals_gender_split,
+        job_id,
+        dest,
+        output_format,
+        extract_model,
+        split_model,
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "pipeline": {"step1": extract_model, "step2": split_model},
+    }
 
 
 @app.get(
