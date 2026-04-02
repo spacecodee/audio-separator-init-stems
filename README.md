@@ -2,16 +2,18 @@
 
 Proyecto: API y contenedor para separar stems usando `audio-separator` (UVR/MelBand-RoFormer, MDX, Demucs, etc.).
 
-Este repositorio contiene una pequeña API FastAPI (`main.py`) que orquesta separación por modelos, pipeline de 3 pasos, flujos especializados (guitarra, reconstrucción vocal, split hombre/mujer) y endpoints de efectos (dereverb/deecho), además de `Dockerfile` + `docker-compose.yml` para ejecutarlo en contenedor (GPU opcional).
+Este repositorio contiene una API FastAPI modular que orquesta separación por modelos, pipeline de 3 pasos, flujos especializados (guitarra, reconstrucción vocal, split hombre/mujer) y endpoints de efectos (dereverb/deecho), además de `Dockerfile` + `docker-compose.yml` para ejecutarlo en contenedor (GPU opcional).
 
 ## Estructura relevante
 
-- `main.py` — FastAPI con endpoints de separación, pipelines y gestión de jobs.
+- `main.py` — entrypoint liviano de FastAPI (wire de routers + startup).
+- `stem_api/` — paquete principal con configuración, validadores, workers y routers.
 - `Dockerfile` — imagen que instala `audio-separator` y levanta `uvicorn main:app`.
 - `docker-compose.yml` — servicio `stem-separator` (nombre del servicio y `container_name: stem-separator`).
 - `input/`, `models/`, `output/` — carpetas montadas en el contenedor (vacías en el repo).
 - `export_models_json.sh` — script auxiliar para exportar el listado de modelos a JSON.
 - `scripts/` — un script bash por endpoint de la API.
+- `tests/` — pruebas unitarias e integración mínima.
 
 ## Quickstart (Docker Compose)
 
@@ -364,9 +366,19 @@ docker run --rm -it \
 - Dentro del contenedor, ejecuta `audio-separator --env_info` para verificar que ONNXRuntime detecta CUDA.
 - Si los modelos no se descargan, revisa permisos y espacio en disco en `./models` (montado como `/root/.cache/audio-separator` en el contenedor).
 
+## Tests
+
+Ejecutar pruebas locales:
+
+```bash
+cd /teamspace/studios/this_studio/audio-separator-init-stems
+pytest -q
+```
+
 ## Archivos importantes
 
-- [main.py](main.py) — implementa la API y el pipeline.
+- [main.py](main.py) — inicializa FastAPI y registra routers.
+- [stem_api](stem_api) — configuración, workers, validadores y routers.
 - [docker-compose.yml](docker-compose.yml) — define el servicio `stem-separator`.
 - [export_models_json.sh](export_models_json.sh) — script de exportación de modelos.
 

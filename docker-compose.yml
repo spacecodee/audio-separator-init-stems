@@ -15,6 +15,7 @@ services:
               capabilities: [gpu]
     volumes:
       - ./main.py:/app/main.py
+      - ./stem_api:/app/stem_api
       - ./models-explorer.html:/app/models-explorer.html
       - ./models-explorer.css:/app/models-explorer.css
       - ./models-explorer.js:/app/models-explorer.js

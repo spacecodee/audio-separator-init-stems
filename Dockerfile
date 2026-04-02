@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     && mkdir -p /app/input /app/output
 
 COPY main.py /app/main.py
+COPY stem_api /app/stem_api
 COPY models-explorer.html /app/models-explorer.html
 COPY models-explorer.css /app/models-explorer.css
 COPY models-explorer.js /app/models-explorer.js
