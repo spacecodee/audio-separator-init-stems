@@ -155,6 +155,34 @@ GUITAR_DEREVERB_MODELS = {
 }
 VOCAL_RECONSTRUCT_MODELS = {"vocals_resurrection", "vocals_revive"}
 VOCAL_GENDER_SPLIT_MODELS = {"chorus_male_female", "male_female_aufr33"}
+DEREVERB_MODELS = {
+    "dereverb_mel",
+    "dereverb_mel_la",
+    "dereverb_mel_mono",
+    "dereverb_mel_big",
+    "dereverb_mel_sbig",
+    "dereverb_bs",
+    "dereverb_vr",
+    "dereverb_mdx23c",
+    "dereverb_echo",
+    "dereverb_echo_fused",
+    "dereverb_echo_v1",
+    "deecho_dereverb_vr",
+}
+DEECHO_MODELS = {
+    "deecho_normal",
+    "deecho_aggressive",
+    "dereverb_echo",
+    "dereverb_echo_fused",
+    "dereverb_echo_v1",
+    "deecho_dereverb_vr",
+}
+COMBINED_DEREVERB_DEECHO_MODELS = {
+    "dereverb_echo",
+    "dereverb_echo_fused",
+    "dereverb_echo_v1",
+    "deecho_dereverb_vr",
+}
 
 jobs: dict = {}
 
@@ -197,6 +225,18 @@ def require_stem(stems: dict, preferred_keys: list[str], message_prefix: str) ->
     raise FileNotFoundError(f"{message_prefix}. Stems: {list(stems.keys())}")
 
 
+def pick_clean_stem(stems: dict) -> Path | None:
+    clean = find_stem(
+        stems,
+        ["dry", "vocals", "instrumental", "guitar", "piano", "bass", "drums", "other", "backing"],
+    )
+    if clean:
+        return clean
+    if stems:
+        return next(iter(stems.values()))
+    return None
+
+
 def classify_stem(name: str) -> str | None:
     n = name.lower()
     patterns = [
@@ -209,7 +249,8 @@ def classify_stem(name: str) -> str | None:
         ("male", ("male", "masc")),
         ("instrumental", ("instrumental",)),
         ("backing", ("backing", "no_vocals", "novocal")),
-        ("dry", ("dry", "no_reverb", "norev")),
+        ("dry", ("dry", "no_reverb", "norev", "no_echo", "noecho", "no-echo", "no echo", "clean")),
+        ("echo", ("echo",)),
         ("reverb", ("reverb", "wet")),
         ("vocals", ("vocal", "voice")),
     ]
@@ -256,6 +297,148 @@ def run_separation(job_id: str, file_path: Path, model_key: str, output_format: 
         logger.error(f"[{job_id}] Error: {e}")
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"] = str(e)
+    finally:
+        file_path.unlink(missing_ok=True)
+
+
+def run_effect_single(job_id: str, file_path: Path, model_key: str, output_format: str, error_label: str):
+    step1_dir = OUTPUT_DIR / job_id / "step1"
+    step1_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        jobs[job_id]["status"] = "processing"
+        sep = make_separator(step1_dir)
+        sep.output_format = output_format
+        sep.load_model(MODELS[model_key])
+        sep.separate(str(file_path))
+
+        stems = rename_stems(step1_dir, "s1")
+        clean_path = pick_clean_stem(stems)
+        if not clean_path:
+            raise FileNotFoundError(f"No se encontró stem limpio. Stems: {list(stems.keys())}")
+
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["files"] = {k: v.name for k, v in stems.items()}
+        jobs[job_id]["summary"] = {
+            "clean_audio": clean_path.name,
+            "clean_source": model_key,
+        }
+        jobs[job_id]["download_base"] = f"/download/{job_id}"
+    except Exception as e:
+        logger.error(f"[{job_id}] {error_label}: {e}")
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["error"] = str(e)
+    finally:
+        file_path.unlink(missing_ok=True)
+
+
+def run_effects_dereverb_deecho(
+    job_id: str,
+    file_path: Path,
+    output_format: str,
+    combined_model: str,
+    fallback_sequential: bool,
+    fallback_dereverb_model: str,
+    fallback_deecho_model: str,
+):
+    step_dirs = {i: OUTPUT_DIR / job_id / f"step{i}" for i in range(1, 3)}
+    for d in step_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+
+    jobs[job_id]["status"] = "processing"
+    jobs[job_id]["pipeline"] = {}
+    jobs[job_id]["processing_mode"] = "fused"
+
+    try:
+        sep = make_separator(step_dirs[1])
+        sep.output_format = output_format
+
+        jobs[job_id]["pipeline"]["step1"] = "running"
+        sep.load_model(MODELS[combined_model])
+        sep.separate(str(file_path))
+        fused_stems = rename_stems(step_dirs[1], "s1")
+        jobs[job_id]["pipeline"]["step1"] = {
+            "model": combined_model,
+            "files": {k: v.name for k, v in fused_stems.items()},
+        }
+
+        fused_clean = pick_clean_stem(fused_stems)
+        if not fused_clean:
+            raise FileNotFoundError(f"No se encontró stem limpio con modelo fused. Stems: {list(fused_stems.keys())}")
+
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["files"] = {k: v.name for k, v in fused_stems.items()}
+        jobs[job_id]["summary"] = {
+            "clean_audio": fused_clean.name,
+            "clean_source": combined_model,
+        }
+        jobs[job_id]["download_base"] = f"/download/{job_id}"
+    except Exception as fused_error:
+        if not fallback_sequential:
+            logger.error(f"[{job_id}] Combined dereverb/deecho error: {fused_error}")
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["error"] = str(fused_error)
+            return
+
+        try:
+            logger.warning(f"[{job_id}] Fused falló, aplicando fallback secuencial: {fused_error}")
+            jobs[job_id]["processing_mode"] = "sequential"
+            jobs[job_id]["fallback_reason"] = str(fused_error)
+
+            if step_dirs[1].exists():
+                shutil.rmtree(step_dirs[1])
+            step_dirs[1].mkdir(parents=True, exist_ok=True)
+            if step_dirs[2].exists():
+                shutil.rmtree(step_dirs[2])
+            step_dirs[2].mkdir(parents=True, exist_ok=True)
+
+            sep = make_separator(step_dirs[1])
+            sep.output_format = output_format
+
+            jobs[job_id]["pipeline"]["step1"] = "running"
+            sep.load_model(MODELS[fallback_dereverb_model])
+            sep.separate(str(file_path))
+            step1_stems = rename_stems(step_dirs[1], "s1")
+            jobs[job_id]["pipeline"]["step1"] = {
+                "model": fallback_dereverb_model,
+                "files": {k: v.name for k, v in step1_stems.items()},
+            }
+
+            step1_clean = require_stem(
+                step1_stems,
+                ["dry", "vocals", "instrumental", "guitar", "other"],
+                "No se encontró stem limpio tras dereverb en fallback",
+            )
+
+            jobs[job_id]["pipeline"]["step2"] = "running"
+            sep.output_dir = str(step_dirs[2])
+            sep.load_model(MODELS[fallback_deecho_model])
+            sep.separate(str(step1_clean))
+            step2_stems = rename_stems(step_dirs[2], "s2")
+            jobs[job_id]["pipeline"]["step2"] = {
+                "model": fallback_deecho_model,
+                "files": {k: v.name for k, v in step2_stems.items()},
+            }
+
+            final_clean = pick_clean_stem(step2_stems)
+            if not final_clean:
+                raise FileNotFoundError(
+                    f"No se encontró stem limpio tras deecho en fallback. Stems: {list(step2_stems.keys())}"
+                )
+
+            jobs[job_id]["status"] = "done"
+            jobs[job_id]["files"] = {k: v.name for k, v in step2_stems.items()}
+            jobs[job_id]["summary"] = {
+                "clean_audio": final_clean.name,
+                "clean_source": f"{fallback_dereverb_model}->{fallback_deecho_model}",
+            }
+            jobs[job_id]["download_base"] = f"/download/{job_id}"
+        except Exception as fallback_error:
+            logger.error(f"[{job_id}] Fallback secuencial falló: {fallback_error}")
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["error"] = (
+                f"Fused failed: {fused_error}. Sequential fallback failed: {fallback_error}"
+            )
     finally:
         file_path.unlink(missing_ok=True)
 
@@ -520,7 +703,7 @@ async def preload_pipeline_models():
     import asyncio
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, run_preload_models,
-                               ["mel_roformer", "mel_karaoke", "dereverb_mel"])
+                               ["mel_roformer", "mel_karaoke", "dereverb_mel", "deecho_normal", "dereverb_echo"])
     logger.info("Modelos del pipeline listos.")
 
 
@@ -593,6 +776,15 @@ def list_models():
         "guitar_pipeline_default": {"step1": "htdemucs_6s", "step2": "dereverb_mel"},
         "vocals_reconstruct_default": {"step1": "mel_roformer", "step2": "vocals_resurrection"},
         "vocals_male_female_default": {"step1": "mel_roformer", "step2": "chorus_male_female"},
+        "effects_default": {
+            "dereverb": "dereverb_mel",
+            "deecho": "deecho_normal",
+            "dereverb_deecho": {
+                "combined_model": "dereverb_echo",
+                "fallback_dereverb_model": "dereverb_mel",
+                "fallback_deecho_model": "deecho_normal",
+            },
+        },
     }
 
 
@@ -816,6 +1008,132 @@ async def separate_vocals_male_female(
         "job_id": job_id,
         "status": "queued",
         "pipeline": {"step1": extract_model, "step2": split_model},
+    }
+
+
+@app.post(
+    "/effects/dereverb",
+    summary="Eliminar reverb",
+    responses={400: {"description": "Parámetros inválidos"}},
+)
+async def effects_dereverb(
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File(..., description="Archivo de audio (mp3, wav, flac)")],
+    model: Annotated[str, Form(description="Modelo para eliminar reverb")] = "dereverb_mel",
+    output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
+):
+    validate_output_format(output_format)
+    validate_model_key("model", model, DEREVERB_MODELS)
+
+    job_id = str(uuid.uuid4())
+    dest = INPUT_DIR / f"{job_id}.wav"
+    with dest.open("wb") as fh:
+        shutil.copyfileobj(file.file, fh)
+
+    jobs[job_id] = {
+        "status": "queued",
+        "type": "dereverb_single",
+        "model": model,
+        "files": {},
+    }
+    background_tasks.add_task(run_effect_single, job_id, dest, model, output_format, "Dereverb error")
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "type": "dereverb_single",
+        "model": model,
+    }
+
+
+@app.post(
+    "/effects/deecho",
+    summary="Eliminar echo",
+    responses={400: {"description": "Parámetros inválidos"}},
+)
+async def effects_deecho(
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File(..., description="Archivo de audio (mp3, wav, flac)")],
+    model: Annotated[str, Form(description="Modelo para eliminar echo")] = "deecho_normal",
+    output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
+):
+    validate_output_format(output_format)
+    validate_model_key("model", model, DEECHO_MODELS)
+
+    job_id = str(uuid.uuid4())
+    dest = INPUT_DIR / f"{job_id}.wav"
+    with dest.open("wb") as fh:
+        shutil.copyfileobj(file.file, fh)
+
+    jobs[job_id] = {
+        "status": "queued",
+        "type": "deecho_single",
+        "model": model,
+        "files": {},
+    }
+    background_tasks.add_task(run_effect_single, job_id, dest, model, output_format, "Deecho error")
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "type": "deecho_single",
+        "model": model,
+    }
+
+
+@app.post(
+    "/effects/dereverb-deecho",
+    summary="Eliminar reverb y echo",
+    responses={400: {"description": "Parámetros inválidos"}},
+)
+async def effects_dereverb_deecho(
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File(..., description="Archivo de audio (mp3, wav, flac)")],
+    combined_model: Annotated[str, Form(description="Modelo combinado (fused)")] = "dereverb_echo",
+    fallback_sequential: Annotated[bool, Form(description="Si fused falla, usar fallback secuencial")] = True,
+    fallback_dereverb_model: Annotated[str, Form(description="Modelo dereverb para fallback")] = "dereverb_mel",
+    fallback_deecho_model: Annotated[str, Form(description="Modelo deecho para fallback")] = "deecho_normal",
+    output_format: Annotated[str, Form(description="Formato salida: wav, flac, mp3")] = "wav",
+):
+    validate_output_format(output_format)
+    validate_model_key("combined_model", combined_model, COMBINED_DEREVERB_DEECHO_MODELS)
+    validate_model_key("fallback_dereverb_model", fallback_dereverb_model, DEREVERB_MODELS)
+    validate_model_key("fallback_deecho_model", fallback_deecho_model, DEECHO_MODELS)
+
+    job_id = str(uuid.uuid4())
+    dest = INPUT_DIR / f"{job_id}.wav"
+    with dest.open("wb") as fh:
+        shutil.copyfileobj(file.file, fh)
+
+    jobs[job_id] = {
+        "status": "queued",
+        "type": "dereverb_deecho_combined",
+        "pipeline": {},
+        "processing_mode": "fused",
+        "models": {
+            "combined_model": combined_model,
+            "fallback_dereverb_model": fallback_dereverb_model,
+            "fallback_deecho_model": fallback_deecho_model,
+        },
+        "options": {"fallback_sequential": fallback_sequential},
+    }
+    background_tasks.add_task(
+        run_effects_dereverb_deecho,
+        job_id,
+        dest,
+        output_format,
+        combined_model,
+        fallback_sequential,
+        fallback_dereverb_model,
+        fallback_deecho_model,
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "type": "dereverb_deecho_combined",
+        "combined_model": combined_model,
+        "fallback_sequential": fallback_sequential,
     }
 
 

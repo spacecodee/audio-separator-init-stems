@@ -2,18 +2,22 @@
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:8000}"
-AUDIO="${AUDIO:-/teamspace/studios/this_studio/audio/Audio04.wav}"
-SPLIT_MODEL="${SPLIT_MODEL:-htdemucs_6s}"
-DEREVERB_MODEL="${DEREVERB_MODEL:-deecho_aggressive}"
+AUDIO="${AUDIO:-/teamspace/studios/this_studio/audio/Audio03.wav}"
+COMBINED_MODEL="${COMBINED_MODEL:-dereverb_echo}"
+FALLBACK_SEQUENTIAL="${FALLBACK_SEQUENTIAL:-true}"
+FALLBACK_DEREVERB_MODEL="${FALLBACK_DEREVERB_MODEL:-dereverb_mel}"
+FALLBACK_DEECHO_MODEL="${FALLBACK_DEECHO_MODEL:-deecho_normal}"
 OUTPUT_FORMAT="${OUTPUT_FORMAT:-wav}"
 POLL_SECONDS="${POLL_SECONDS:-5}"
 
 [[ -f "$AUDIO" ]] || { echo "No existe el audio: $AUDIO" >&2; exit 1; }
 
-JOB_RESPONSE="$(curl -sS -X POST "$BASE/separate/guitar/pipeline" \
+JOB_RESPONSE="$(curl -sS -X POST "$BASE/effects/dereverb-deecho" \
   -F "file=@$AUDIO" \
-  -F "split_model=$SPLIT_MODEL" \
-  -F "dereverb_model=$DEREVERB_MODEL" \
+  -F "combined_model=$COMBINED_MODEL" \
+  -F "fallback_sequential=$FALLBACK_SEQUENTIAL" \
+  -F "fallback_dereverb_model=$FALLBACK_DEREVERB_MODEL" \
+  -F "fallback_deecho_model=$FALLBACK_DEECHO_MODEL" \
   -F "output_format=$OUTPUT_FORMAT")"
 
 JOB_ID="$(echo "$JOB_RESPONSE" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("job_id",""))')"

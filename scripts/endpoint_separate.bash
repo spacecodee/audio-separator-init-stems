@@ -2,8 +2,8 @@
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:8000}"
-AUDIO="${AUDIO:-/teamspace/studios/this_studio/audio/Audio03.wav}"
-MODEL="${MODEL:-mel_roformer}"
+AUDIO="${AUDIO:-/teamspace/studios/this_studio/audio/Audio04.wav}"
+MODEL="${MODEL:-deecho_aggressive}"
 OUTPUT_FORMAT="${OUTPUT_FORMAT:-wav}"
 POLL_SECONDS="${POLL_SECONDS:-5}"
 

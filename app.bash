@@ -1,5 +1,5 @@
 BASE="http://localhost:8000"
-AUDIO="/teamspace/studios/this_studio/audio/12 - Love Me.flac"
+AUDIO="/teamspace/studios/this_studio/audio/Audio03.wav"
 
 JOB=$(curl -s -X POST "$BASE/separate/pipeline" \
     -F "file=@$AUDIO" \

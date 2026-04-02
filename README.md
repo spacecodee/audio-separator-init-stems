@@ -2,7 +2,7 @@
 
 Proyecto: API y contenedor para separar stems usando `audio-separator` (UVR/MelBand-RoFormer, MDX, Demucs, etc.).
 
-Este repositorio contiene una pequeña API FastAPI (`main.py`) que orquesta separación por modelos, pipeline de 3 pasos y flujos especializados (guitarra, reconstrucción vocal y split hombre/mujer), además de `Dockerfile` + `docker-compose.yml` para ejecutarlo en contenedor (GPU opcional).
+Este repositorio contiene una pequeña API FastAPI (`main.py`) que orquesta separación por modelos, pipeline de 3 pasos, flujos especializados (guitarra, reconstrucción vocal, split hombre/mujer) y endpoints de efectos (dereverb/deecho), además de `Dockerfile` + `docker-compose.yml` para ejecutarlo en contenedor (GPU opcional).
 
 ## Estructura relevante
 
@@ -168,6 +168,36 @@ curl -X POST "http://localhost:8000/separate/vocals/male-female" \
   -F "output_format=wav"
 ```
 
+- Efecto: eliminar reverb:
+
+```bash
+curl -X POST "http://localhost:8000/effects/dereverb" \
+  -F "file=@./input/song.wav" \
+  -F "model=dereverb_mel" \
+  -F "output_format=wav"
+```
+
+- Efecto: eliminar echo:
+
+```bash
+curl -X POST "http://localhost:8000/effects/deecho" \
+  -F "file=@./input/song.wav" \
+  -F "model=deecho_normal" \
+  -F "output_format=wav"
+```
+
+- Efecto: eliminar reverb + echo (fused con fallback secuencial):
+
+```bash
+curl -X POST "http://localhost:8000/effects/dereverb-deecho" \
+  -F "file=@./input/song.wav" \
+  -F "combined_model=dereverb_echo" \
+  -F "fallback_sequential=true" \
+  -F "fallback_dereverb_model=dereverb_mel" \
+  -F "fallback_deecho_model=deecho_normal" \
+  -F "output_format=wav"
+```
+
 - Consultar estado del job:
 
 ```bash
@@ -218,6 +248,12 @@ Endpoints asíncronos de separación:
 - `scripts/endpoint_separate_vocals_reconstruct.bash` → `POST /separate/vocals/reconstruct`
 - `scripts/endpoint_separate_vocals_male_female.bash` → `POST /separate/vocals/male-female`
 
+Endpoints asíncronos de efectos:
+
+- `scripts/endpoint_effects_dereverb.bash` → `POST /effects/dereverb`
+- `scripts/endpoint_effects_deecho.bash` → `POST /effects/deecho`
+- `scripts/endpoint_effects_dereverb_deecho.bash` → `POST /effects/dereverb-deecho`
+
 Endpoints de job/resultados:
 
 - `scripts/endpoint_job_status.bash` → `GET /jobs/{job_id}`
@@ -230,6 +266,10 @@ Variables de entorno utiles en scripts (segun el caso):
 - `AUDIO` (default: `/teamspace/studios/this_studio/audio/Audio03.wav`)
 - `OUTPUT_FORMAT` (`wav|flac|mp3`)
 - `POLL_SECONDS` (default: `5`)
+- `MODEL` (effects dereverb/deecho)
+- `COMBINED_MODEL` (effects dereverb-deecho)
+- `FALLBACK_SEQUENTIAL` (`true|false` para endpoint combinado)
+- `FALLBACK_DEREVERB_MODEL` y `FALLBACK_DEECHO_MODEL` (fallback combinado)
 
 ## Exportar listado de modelos a JSON (script)
 
