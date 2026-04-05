@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="${BASE:-http://localhost:8000}"
-AUDIO="${AUDIO:-/teamspace/studios/this_studio/audio/Audio04.wav}"
-SPLIT_MODEL="${SPLIT_MODEL:-htdemucs_6s}"
-DEREVERB_MODEL="${DEREVERB_MODEL:-deecho_aggressive}"
-OUTPUT_FORMAT="${OUTPUT_FORMAT:-wav}"
-POLL_SECONDS="${POLL_SECONDS:-5}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/.env_loader.bash"
+
+BASE="${BASE:-${DEFAULT_BASE:-http://localhost:8000}}"
+AUDIO="${AUDIO:-${SEPARATE_GUITAR_AUDIO:-${DEFAULT_AUDIO:-/teamspace/studios/this_studio/audio/Audio04.wav}}}"
+SPLIT_MODEL="${SPLIT_MODEL:-${GUITAR_SPLIT_MODEL:-htdemucs_6s}}"
+DEREVERB_MODEL="${DEREVERB_MODEL:-${GUITAR_DEREVERB_MODEL:-dereverb_mel}}"
+OUTPUT_FORMAT="${OUTPUT_FORMAT:-${DEFAULT_OUTPUT_FORMAT:-wav}}"
+POLL_SECONDS="${POLL_SECONDS:-${DEFAULT_POLL_SECONDS:-5}}"
 
 [[ -f "$AUDIO" ]] || { echo "No existe el audio: $AUDIO" >&2; exit 1; }
 

@@ -2,14 +2,17 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/scripts/.env_loader.bash"
+
 PROJECT_DIR="$SCRIPT_DIR"
 INPUT_DIR_HOST="$PROJECT_DIR/input"
 OUTPUT_DIR_HOST="$PROJECT_DIR/output"
 
 SERVICE_NAME="${SERVICE_NAME:-stem-separator}"
 OUTPUT_FORMAT="${OUTPUT_FORMAT:-wav}"
-DEREVERB_MODEL="${DEREVERB_MODEL:-dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt}"
-KARAOKE_SPLIT_MODEL="${KARAOKE_SPLIT_MODEL:-mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt}"
+DEREVERB_MODEL="${DEREVERB_MODEL:-${BEST_PIPELINE_DEREVERB_MODEL:-dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt}}"
+KARAOKE_SPLIT_MODEL="${KARAOKE_SPLIT_MODEL:-${BEST_PIPELINE_KARAOKE_SPLIT_MODEL:-mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt}}"
 
 OUTPUT_FORMAT="$(printf '%s' "$OUTPUT_FORMAT" | tr '[:upper:]' '[:lower:]')"
 

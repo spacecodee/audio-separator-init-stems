@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="${BASE:-http://localhost:8000}"
-AUDIO="${AUDIO:-/teamspace/studios/this_studio/audio/Audio03.wav}"
-STEP1_MODEL="${STEP1_MODEL:-bs_roformer}"
-STEP2_MODEL="${STEP2_MODEL:-mel_karaoke_gabox}"
-STEP3_MODEL="${STEP3_MODEL:-dereverb_echo}"
-OUTPUT_FORMAT="${OUTPUT_FORMAT:-wav}"
-POLL_SECONDS="${POLL_SECONDS:-5}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/.env_loader.bash"
+
+BASE="${BASE:-${DEFAULT_BASE:-http://localhost:8000}}"
+AUDIO="${AUDIO:-${SEPARATE_PIPELINE_AUDIO:-${DEFAULT_AUDIO:-/teamspace/studios/this_studio/audio/Audio03.wav}}}"
+STEP1_MODEL="${STEP1_MODEL:-${PIPELINE_STEP1_MODEL:-bs_roformer}}"
+STEP2_MODEL="${STEP2_MODEL:-${PIPELINE_STEP2_MODEL:-mel_karaoke_gabox}}"
+STEP3_MODEL="${STEP3_MODEL:-${PIPELINE_STEP3_MODEL:-dereverb_echo}}"
+OUTPUT_FORMAT="${OUTPUT_FORMAT:-${DEFAULT_OUTPUT_FORMAT:-wav}}"
+POLL_SECONDS="${POLL_SECONDS:-${DEFAULT_POLL_SECONDS:-5}}"
 
 [[ -f "$AUDIO" ]] || { echo "No existe el audio: $AUDIO" >&2; exit 1; }
 

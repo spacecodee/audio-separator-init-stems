@@ -2,7 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORT="${1:-8088}"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/.env_loader.bash"
+
+PORT="${1:-${MODELS_EXPLORER_PORT:-8088}}"
 
 cd "$ROOT_DIR"
 

@@ -226,7 +226,9 @@ Preparacion:
 
 ```bash
 cd /teamspace/studios/this_studio/audio-separator-init-stems
+cp -n .env.example .env
 chmod +x scripts/*.bash
+chmod +x scripts/validate_endpoints.bash
 ```
 
 Endpoints de lectura/metadata:
@@ -262,16 +264,42 @@ Endpoints de job/resultados:
 - `scripts/endpoint_download.bash` → `GET /download/{job_id}/{filename}`
 - `scripts/endpoint_job_delete.bash` → `DELETE /jobs/{job_id}`
 
-Variables de entorno utiles en scripts (segun el caso):
+Configuracion centralizada con `.env`:
 
-- `BASE` (default: `http://localhost:8000`)
-- `AUDIO` (default: `/teamspace/studios/this_studio/audio/Audio03.wav`)
-- `OUTPUT_FORMAT` (`wav|flac|mp3`)
-- `POLL_SECONDS` (default: `5`)
-- `MODEL` (effects dereverb/deecho)
-- `COMBINED_MODEL` (effects dereverb-deecho)
-- `FALLBACK_SEQUENTIAL` (`true|false` para endpoint combinado)
-- `FALLBACK_DEREVERB_MODEL` y `FALLBACK_DEECHO_MODEL` (fallback combinado)
+- Los scripts cargan automaticamente `./.env` (si existe).
+- Puedes sobreescribir cualquier valor por ejecucion, por ejemplo:
+
+```bash
+BASE=http://127.0.0.1:9000 AUDIO=./input/song.wav ./scripts/endpoint_separate.bash
+```
+
+Variables comunes:
+
+- `DEFAULT_BASE`, `DEFAULT_AUDIO`, `DEFAULT_OUTPUT_FORMAT`, `DEFAULT_POLL_SECONDS`
+
+Variables por endpoint (ejemplos):
+
+- `SEPARATE_AUDIO`, `SEPARATE_MODEL`
+- `PIPELINE_STEP1_MODEL`, `PIPELINE_STEP2_MODEL`, `PIPELINE_STEP3_MODEL`
+- `GUITAR_SPLIT_MODEL`, `GUITAR_DEREVERB_MODEL`
+- `VOCALS_RECONSTRUCT_EXTRACT_MODEL`, `VOCALS_RECONSTRUCT_MODEL`
+- `VOCALS_MALE_FEMALE_EXTRACT_MODEL`, `VOCALS_MALE_FEMALE_SPLIT_MODEL`
+- `EFFECTS_DEREVERB_MODEL`, `EFFECTS_DEECHO_MODEL`, `EFFECTS_COMBINED_MODEL`
+- `EFFECTS_FALLBACK_SEQUENTIAL`, `EFFECTS_FALLBACK_DEREVERB_MODEL`, `EFFECTS_FALLBACK_DEECHO_MODEL`
+
+Archivos de salida para endpoints de descarga/metadata:
+
+- `DOCS_OUT`, `MODELS_EXPLORER_OUT`, `MODELS_EXPLORER_HTML_OUT`
+- `MODELS_EXPLORER_CSS_OUT`, `MODELS_EXPLORER_JS_OUT`
+- `MODELS_JSON_OUT`, `OPENAPI_JSON_OUT`, `DOWNLOAD_OUT_DIR`
+
+Validacion de endpoints en scripts:
+
+```bash
+./scripts/validate_endpoints.bash
+```
+
+El validador comprueba que todos los `endpoint_*.bash` apunten a las rutas esperadas de la API, incluyendo el polling a `/jobs/$JOB_ID` en scripts asincronos.
 
 ## Exportar listado de modelos a JSON (script)
 

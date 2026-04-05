@@ -1,20 +1,36 @@
-BASE="http://localhost:8000"
-AUDIO="/teamspace/studios/this_studio/audio/Audio03.wav"
+#!/usr/bin/env bash
+set -euo pipefail
 
-JOB=$(curl -s -X POST "$BASE/separate/pipeline" \
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/scripts/.env_loader.bash"
+
+BASE="${BASE:-${DEFAULT_BASE:-http://localhost:8000}}"
+AUDIO="${AUDIO:-${APP_AUDIO_FILE:-${DEFAULT_AUDIO:-/teamspace/studios/this_studio/audio/Audio03.wav}}}"
+STEP1_MODEL="${STEP1_MODEL:-${APP_PIPELINE_STEP1_MODEL:-${PIPELINE_STEP1_MODEL:-bs_roformer}}}"
+STEP2_MODEL="${STEP2_MODEL:-${APP_PIPELINE_STEP2_MODEL:-${PIPELINE_STEP2_MODEL:-mel_karaoke_gabox}}}"
+STEP3_MODEL="${STEP3_MODEL:-${APP_PIPELINE_STEP3_MODEL:-${PIPELINE_STEP3_MODEL:-dereverb_echo}}}"
+OUTPUT_FORMAT="${OUTPUT_FORMAT:-${APP_OUTPUT_FORMAT:-${DEFAULT_OUTPUT_FORMAT:-wav}}}"
+POLL_SECONDS="${POLL_SECONDS:-${APP_POLL_SECONDS:-${DEFAULT_POLL_SECONDS:-5}}}"
+
+[[ -f "$AUDIO" ]] || { echo "No existe el audio: $AUDIO" >&2; exit 1; }
+
+JOB="$(curl -sS -X POST "$BASE/separate/pipeline" \
     -F "file=@$AUDIO" \
-    -F "step1_model=bs_roformer" \
-    -F "step2_model=mel_karaoke_gabox" \
-    -F "step3_model=dereverb_echo" \
--F "output_format=wav" | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+    -F "step1_model=$STEP1_MODEL" \
+    -F "step2_model=$STEP2_MODEL" \
+    -F "step3_model=$STEP3_MODEL" \
+    -F "output_format=$OUTPUT_FORMAT" \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin).get("job_id",""))')"
 
+[[ -n "$JOB" ]] || { echo "No se pudo obtener job_id" >&2; exit 1; }
 echo "Job: $JOB"
 
 while true; do
-    RESP=$(curl -s "$BASE/jobs/$JOB")
-    STATUS=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+    RESP="$(curl -sS "$BASE/jobs/$JOB")"
+    STATUS="$(echo "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status","unknown"))')"
     echo "Estado: $STATUS"
     [ "$STATUS" = "done" ] && echo "$RESP" && break
     [ "$STATUS" = "error" ] && echo "$RESP" && break
-    sleep 5
+    sleep "$POLL_SECONDS"
 done
