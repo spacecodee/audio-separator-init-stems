@@ -12,3 +12,5 @@ models_list.json
 
 # Python cache artifacts
 __pycache__/
+
+.env
